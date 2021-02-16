@@ -125,6 +125,7 @@ int main(int argc, char *argv[]) {
          */
 
         /* Create thread to serve connection to client. */
+        active = 1;
         if (pthread_create(&pthread, &pthread_attr, pthread_routine, (void *)pthread_arg) != 0) {
             perror("pthread_create");
             free(pthread_arg);
@@ -141,6 +142,9 @@ int main(int argc, char *argv[]) {
 }
 
 void read_user_name(int socket_fd, int length);
+void write_open_device(int socket_fd, camera_event_packet_header* header);
+void write_close_device(int socket_fd, camera_event_packet_header* header);
+void msleep(int delay);
 
 void *pthread_routine(void *arg) {
     pthread_arg_t *pthread_arg = (pthread_arg_t *)arg;
@@ -151,11 +155,11 @@ void *pthread_routine(void *arg) {
     free(arg);
 
     /* Print log */
-    active = 1;
     printf("thread is running\n");
 
     /* Initialize */
     int retval = 0;
+    int received_user_name = 0, already_sent_open_device = 0, already_sent_close_device = 0;
     camera_event_packet_header header;
     memset(&header, 0, sizeof(camera_event_packet_header));
 
@@ -173,12 +177,27 @@ void *pthread_routine(void *arg) {
         switch (header.event) {
             case USER_NAME:
                 read_user_name(new_socket_fd, header.length);
+                received_user_name = 1;
                 break;
 
         }
 
         /* Reset the packet */
         memset(&header, 0, sizeof(camera_event_packet_header));
+
+        /* Send the open device */
+        if (received_user_name && !already_sent_open_device) {
+            msleep(10000);
+            write_open_device(new_socket_fd, &header);
+            already_sent_open_device = 1;
+        }
+
+        /* Send the close device */
+        if (already_sent_open_device && !already_sent_close_device) {
+            msleep(10000);
+            write_close_device(new_socket_fd, &header);
+            already_sent_close_device = 1;
+        }
 
     }
 
@@ -191,7 +210,41 @@ void read_user_name(int socket_fd, int length) {
     char* user_name = calloc(1, length + 1);
 
     read(socket_fd, user_name, length + 1);
-    printf("User name: %s\n", user_name);
+    printf("Received user name: %s\n", user_name);
+
+    free(user_name);
+    user_name = NULL;
+
+}
+
+void write_open_device(int socket_fd, camera_event_packet_header* header) {
+
+    header->event = OPEN_DEVICE;
+    header->length = sizeof(camera_event_packet_header);
+
+    write(socket_fd, header, header->length);
+    printf("Sent open_device event.\n");
+
+}
+
+void write_close_device(int socket_fd, camera_event_packet_header* header) {
+
+    header->event = CLOSE_DEVICE;
+    header->length = sizeof(camera_event_packet_header);
+
+    write(socket_fd, header, header->length);
+    printf("Sent close_device event.\n");
+
+}
+
+void msleep(int delay) {
+
+    struct timespec sleep = {
+        .tv_sec  =  delay / 1000,
+        .tv_nsec = (delay % 1000) * 1000000
+    };
+
+    nanosleep(&sleep, NULL);
 
 }
 
