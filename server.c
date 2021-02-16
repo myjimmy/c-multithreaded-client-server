@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "camera.h"
+
 #define BACKLOG 10
 
 typedef struct pthread_arg_t {
@@ -28,12 +30,17 @@ void *pthread_routine(void *arg);
 /* Signal handler to handle SIGTERM and SIGINT signals. */
 void signal_handler(int signal_number);
 
+/* socket */
+int socket_fd = 0;
+int active = 0;
+pthread_t pthread;
+
+/* main function */
 int main(int argc, char *argv[]) {
-    int port, socket_fd, new_socket_fd;
+    int port, new_socket_fd;
     struct sockaddr_in address;
     pthread_attr_t pthread_attr;
     pthread_arg_t *pthread_arg;
-    pthread_t pthread;
     socklen_t client_address_len;
 
     /* Get port from command line arguments or stdin. */
@@ -103,7 +110,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* Accept connection to client. */
-        client_address_len = sizeof pthread_arg->client_address;
+        client_address_len = sizeof(pthread_arg->client_address);
         new_socket_fd = accept(socket_fd, (struct sockaddr *)&pthread_arg->client_address, &client_address_len);
         if (new_socket_fd == -1) {
             perror("accept");
@@ -129,8 +136,11 @@ int main(int argc, char *argv[]) {
      * TODO: If you really want to close the socket, you would do it in
      * signal_handler(), meaning socket_fd would need to be a global variable.
      */
+    close(socket_fd);
     return 0;
 }
+
+void read_user_name(int socket_fd, int length);
 
 void *pthread_routine(void *arg) {
     pthread_arg_t *pthread_arg = (pthread_arg_t *)arg;
@@ -140,16 +150,59 @@ void *pthread_routine(void *arg) {
 
     free(arg);
 
-    /* TODO: Put client interaction code here. For example, use
-     * write(new_socket_fd,,) and read(new_socket_fd,,) to send and receive
-     * messages with the client.
-     */
+    /* Print log */
+    active = 1;
+    printf("thread is running\n");
+
+    /* Initialize */
+    int retval = 0;
+    camera_event_packet_header header;
+    memset(&header, 0, sizeof(camera_event_packet_header));
+
+    /* Event Loop */
+    while (active == 1) {
+
+        /* Read the packet */
+        retval = read(new_socket_fd, &header, sizeof(camera_event_packet_header));
+        if (retval == 0) {
+            printf("socket is disconnected.\n");
+            break;
+        }
+
+        /* Process camera event */
+        switch (header.event) {
+            case USER_NAME:
+                read_user_name(new_socket_fd, header.length);
+                break;
+
+        }
+
+        /* Reset the packet */
+        memset(&header, 0, sizeof(camera_event_packet_header));
+
+    }
 
     close(new_socket_fd);
     return NULL;
 }
 
+void read_user_name(int socket_fd, int length) {
+
+    char* user_name = calloc(1, length + 1);
+
+    read(socket_fd, user_name, length + 1);
+    printf("User name: %s\n", user_name);
+
+}
+
 void signal_handler(int signal_number) {
     /* TODO: Put exit cleanup code here. */
+    if (active == 1) {
+        active = 0;
+        pthread_join(pthread, NULL);
+        printf("thread is closed\n");
+    }
+
+    close(socket_fd);
     exit(0);
 }
