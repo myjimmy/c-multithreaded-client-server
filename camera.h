@@ -30,4 +30,6 @@ typedef struct camera_event_packet_data {
 
 } camera_event_packet_data;
 
+#define MAX_RECEIVED_VIDEO_COUNT 20
+
 #endif // CAMERA_HEADER

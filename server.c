@@ -142,6 +142,7 @@ int main(int argc, char *argv[]) {
 }
 
 void read_user_name(int socket_fd, int length);
+void read_video_data(int socket_fd, int length, int video_frame_no);
 void write_open_device(int socket_fd, camera_event_packet_header* header);
 void write_close_device(int socket_fd, camera_event_packet_header* header);
 void msleep(int delay);
@@ -158,8 +159,9 @@ void *pthread_routine(void *arg) {
     printf("thread is running\n");
 
     /* Initialize */
-    int retval = 0;
+    int retval = 0, length = 0;
     int received_user_name = 0, already_sent_open_device = 0, already_sent_close_device = 0;
+    int receive_video_frame_count = 0;
     camera_event_packet_header header;
     memset(&header, 0, sizeof(camera_event_packet_header));
 
@@ -176,8 +178,15 @@ void *pthread_routine(void *arg) {
         /* Process camera event */
         switch (header.event) {
             case USER_NAME:
-                read_user_name(new_socket_fd, header.length);
+                length = header.length - sizeof(camera_event_packet_header);
+                read_user_name(new_socket_fd, length);
                 received_user_name = 1;
+                break;
+
+            case VIDEO_DATA:
+                length = header.length - sizeof(camera_event_packet_header);
+                read_video_data(new_socket_fd, length, receive_video_frame_count);
+                receive_video_frame_count++;
                 break;
 
         }
@@ -193,8 +202,10 @@ void *pthread_routine(void *arg) {
         }
 
         /* Send the close device */
-        if (already_sent_open_device && !already_sent_close_device) {
-            msleep(10000);
+        if (already_sent_open_device
+                && receive_video_frame_count == MAX_RECEIVED_VIDEO_COUNT
+                && !already_sent_close_device) {
+            msleep(1000);
             write_close_device(new_socket_fd, &header);
             already_sent_close_device = 1;
         }
@@ -214,6 +225,22 @@ void read_user_name(int socket_fd, int length) {
 
     free(user_name);
     user_name = NULL;
+
+}
+
+void read_video_data(int socket_fd, int length, int video_frame_no) {
+
+    uint8_t* video_data = NULL;
+    int real_length = 0;
+
+    video_data = calloc(1, length);
+    real_length = read(socket_fd, video_data, length);
+
+    printf("%02d: Received video data: real_length=%d, packet_length=%d\n",
+        video_frame_no + 1, real_length, length);
+
+    free(video_data);
+    video_data = NULL;
 
 }
 
