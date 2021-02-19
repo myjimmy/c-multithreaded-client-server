@@ -17,6 +17,7 @@
 #include "camera.h"
 
 #define BACKLOG 10
+#define GENERATE_VIDEO_DATA_FILE
 
 typedef struct pthread_arg_t {
     int new_socket_fd;
@@ -267,6 +268,14 @@ void read_video_data(int socket_fd, int length, int video_frame_no) {
 
     printf("%02d: Received video data: total_length=%d, packet_length=%d\n",
         video_frame_no + 1, total_length, length);
+
+#ifdef GENERATE_VIDEO_DATA_FILE
+    char filename[256] = {0};
+    sprintf(filename, "/home/ubuntu/Desktop/video_files/3-h264-server/stream-%04d.h264", video_frame_no);
+    FILE* fp = fopen(filename, "wb");
+    fwrite(video_data, 1, length, fp);
+    fclose(fp);
+#endif
 
     free(video_data);
     video_data = NULL;
