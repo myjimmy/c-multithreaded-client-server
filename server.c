@@ -141,6 +141,7 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+int socket_select(int fd, int usec_timeout);
 void read_user_name(int socket_fd, int length);
 void read_video_data(int socket_fd, int length, int video_frame_no);
 void write_open_device(int socket_fd, camera_event_packet_header* header);
@@ -168,29 +169,32 @@ void *pthread_routine(void *arg) {
     /* Event Loop */
     while (active == 1) {
 
-        /* Read the packet */
-        retval = read(new_socket_fd, &header, sizeof(camera_event_packet_header));
-        if (retval == 0) {
-            printf("socket is disconnected.\n");
-            break;
-        }
-
-        /* Process camera event */
-        switch (header.event) {
-            case USER_NAME:
-                length = header.length - sizeof(camera_event_packet_header);
-                read_user_name(new_socket_fd, length);
-                received_user_name = 1;
+        /* No instruction yet? Get more data ... */
+        retval = socket_select(new_socket_fd, 10000);
+        if (retval > 0) {
+            /* Read the packet */
+            retval = read(new_socket_fd, &header, sizeof(camera_event_packet_header));
+            if (retval == 0) {
+                printf("socket is disconnected.\n");
                 break;
+            }
 
-            case VIDEO_DATA:
-                length = header.length - sizeof(camera_event_packet_header);
-                read_video_data(new_socket_fd, length, receive_video_frame_count);
-                receive_video_frame_count++;
-                break;
+            /* Process camera event */
+            switch (header.event) {
+                case USER_NAME:
+                    length = header.length - sizeof(camera_event_packet_header);
+                    read_user_name(new_socket_fd, length);
+                    received_user_name = 1;
+                    break;
 
+                case VIDEO_DATA:
+                    length = header.length - sizeof(camera_event_packet_header);
+                    read_video_data(new_socket_fd, length, receive_video_frame_count);
+                    receive_video_frame_count++;
+                    break;
+            }
         }
-
+        
         /* Reset the packet */
         memset(&header, 0, sizeof(camera_event_packet_header));
 
@@ -216,6 +220,28 @@ void *pthread_routine(void *arg) {
     return NULL;
 }
 
+int socket_select(int fd, int usec_timeout) {
+
+    fd_set fds;
+
+    /* Initialize fd_set with single underlying file descriptor */
+    FD_ZERO(&fds);
+    FD_SET(fd, &fds);
+
+    /* No timeout if usec_timeout is negative */
+    if (usec_timeout < 0)
+        return select(fd + 1, &fds, NULL, NULL, NULL); 
+
+    /* Handle timeout if specified */
+    struct timeval timeout = {
+        .tv_sec  = usec_timeout / 1000000,
+        .tv_usec = usec_timeout % 1000000
+    };
+
+    return select(fd + 1, &fds, NULL, NULL, &timeout);
+
+}
+
 void read_user_name(int socket_fd, int length) {
 
     char* user_name = calloc(1, length + 1);
@@ -231,13 +257,16 @@ void read_user_name(int socket_fd, int length) {
 void read_video_data(int socket_fd, int length, int video_frame_no) {
 
     uint8_t* video_data = NULL;
-    int real_length = 0;
+    int total_length = 0, read_length = 0;
 
     video_data = calloc(1, length);
-    real_length = read(socket_fd, video_data, length);
+    while (total_length < length) {
+        read_length = read(socket_fd, video_data + total_length, length - total_length);
+        total_length += read_length;
+    }
 
-    printf("%02d: Received video data: real_length=%d, packet_length=%d\n",
-        video_frame_no + 1, real_length, length);
+    printf("%02d: Received video data: total_length=%d, packet_length=%d\n",
+        video_frame_no + 1, total_length, length);
 
     free(video_data);
     video_data = NULL;
